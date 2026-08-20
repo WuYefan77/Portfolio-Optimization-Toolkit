@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "portfolio-optimization-toolkit"
+version = "0.1.0"
+description = "Constrained static mean-variance optimisation and covariance sensitivity tools"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Yefan Wu" }]
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "scipy>=1.11",
+    "matplotlib>=3.7",
+]
+
+[project.optional-dependencies]
+notebooks = ["jupyter>=1.0"]
+test = ["pytest>=8.0"]
+
+[tool.setuptools.packages.find]
+include = ["portfolio_optimizer*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

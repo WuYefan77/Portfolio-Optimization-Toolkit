@@ -1,115 +1,135 @@
-# portfolio_optimizer/reporting.py
-import pandas as pd
-import numpy as np
+"""Tables and plots for portfolio optimisation results."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 from matplotlib.ticker import PercentFormatter
+import numpy as np
+import pandas as pd
+
+from .utils import portfolio_performance
+
 
 class PortfolioReporter:
-    """
-    A reporting engine for formatting portfolio performance, 
-    generating comparison tables, and plotting visual charts.
-    """
-    def __init__(self, asset_names, rf_rate):
-        """
-        Initialize the reporter with asset names and risk-free rate.
-        """
+    """Create performance tables and allocation charts."""
+
+    def __init__(self, asset_names, risk_free_rate: float = 0.0, *, rf_rate=None):
         self.assets = list(asset_names)
-        self.rf = rf_rate
-        plt.style.use('seaborn-v0_8-darkgrid')
+        if not self.assets or len(set(self.assets)) != len(self.assets):
+            raise ValueError("asset_names must be a non-empty sequence of unique names")
+        if rf_rate is not None:
+            risk_free_rate = rf_rate
+        self.risk_free_rate = float(risk_free_rate)
+        if not np.isfinite(self.risk_free_rate):
+            raise ValueError("risk_free_rate must be finite")
+        self.rf = self.risk_free_rate
 
-    def calc_performance(self, w, mu, cov):
-        """
-        Calculate Return, Volatility, and Sharpe Ratio for given weights.
-        """
-        r = float(w @ mu)
-        v = float(np.sqrt(w @ cov @ w))
-        s = (r - self.rf) / (v + 1e-12)
-        return r, v, s
-
-    def create_summary_table(self, portfolios_dict, mu, cov):
-        """
-        Generate a performance summary DataFrame.
-        
-        :param portfolios_dict: dict of {'Portfolio Name': weights_array}
-        """
-        data = []
-        for name, w in portfolios_dict.items():
-            r, v, s = self.calc_performance(w, mu, cov)
-            data.append({'Portfolio': name, 'Return': r, 'Volatility': v, 'Sharpe': s})
-            
-        df = pd.DataFrame(data).set_index('Portfolio')
-        return df
-
-    def format_performance_table(self, df):
-        """
-        Format the performance DataFrame for clean display (percentages and decimals).
-        """
-        out = df.copy()
-        out['Return'] = out['Return'].astype(float).map(lambda x: f'{x:.2%}')
-        out['Volatility'] = out['Volatility'].astype(float).map(lambda x: f'{x:.2%}')
-        out['Sharpe'] = out['Sharpe'].astype(float).map(lambda x: f'{x:.4f}')
-        return out
-
-    def plot_weights_grouped(self, weights_df, title="Portfolio Weights Comparison"):
-        """
-        Plot a grouped bar chart for portfolio weights.
-        """
-        cols = weights_df.columns.tolist()
-        x = np.arange(len(self.assets))
-        width = 0.85 / len(cols)
-        
-        fig, ax = plt.subplots(figsize=(12, 6))
-        for i, c in enumerate(cols):
-            ax.bar(x + i * width, weights_df[c].values, width, label=c)
-            
-        ax.set_xticks(x + width * (len(cols) - 1) / 2)
-        ax.set_xticklabels(self.assets, rotation=30, ha='right')
-        ax.yaxis.set_major_formatter(PercentFormatter(1))
-        ax.set_ylabel('Weight')
-        ax.set_title(title, fontsize=14)
-        ax.legend()
-        plt.tight_layout()
-        plt.show()
-
-    def plot_allocation_pie(self, weights_series, title="Recommended Allocation", save_path=None):
-        """
-        Plot a highly customized pie chart for final asset allocation.
-        Drops assets with weights < 0.01%.
-        """
-        weights = weights_series[weights_series > 0.0001].sort_values(ascending=False)
-        colors = ['#FF8F00', '#4CAF50', '#D32F2F', '#7B1FA2', '#795548']
-        
-        # Make sure we have enough colors
-        if len(weights) > len(colors):
-            import matplotlib.cm as cm
-            colors = cm.get_cmap('tab20').colors[:len(weights)]
-            
-        fig, ax = plt.subplots(figsize=(10, 8), facecolor='none')
-        wedges, texts, autotexts = ax.pie(
-            weights, 
-            autopct='%1.1f%%',
-            startangle=90,
-            colors=colors,
-            pctdistance=0.8,
-            textprops=dict(color="white", weight="bold", size=14),
-            wedgeprops=dict(edgecolor='black')
+    def calculate_performance(self, weights, expected_returns, covariance):
+        expected_return, volatility = portfolio_performance(
+            weights,
+            expected_returns,
+            covariance,
         )
+        sharpe = (expected_return - self.risk_free_rate) / max(volatility, 1e-12)
+        return expected_return, volatility, float(sharpe)
 
-        legend = ax.legend(wedges, weights.index,
-                           title="Asset Classes",
-                           loc="center left",
-                           bbox_to_anchor=(1, 0, 0.5, 1),
-                           fontsize=12,
-                           facecolor='black',    
-                           edgecolor='white',    
-                           labelcolor='white')
-        plt.setp(legend.get_title(), color='white', weight='bold')
+    calc_performance = calculate_performance
 
-        ax.set_title(title, fontsize=16, pad=20, color="white" if save_path else "black")
-        ax.axis('equal')  
-        
-        if save_path:
-            fig.savefig(save_path, dpi=300, bbox_inches='tight', transparent=True)
-            print(f"Pie chart saved to {save_path}")
-            
-        plt.show()
+    def create_summary_table(self, portfolios, expected_returns, covariance) -> pd.DataFrame:
+        rows = []
+        for name, weights in portfolios.items():
+            expected_return, volatility, sharpe = self.calculate_performance(
+                weights,
+                expected_returns,
+                covariance,
+            )
+            rows.append({
+                "Portfolio": name,
+                "Return": expected_return,
+                "Volatility": volatility,
+                "Sharpe": sharpe,
+            })
+        if not rows:
+            raise ValueError("portfolios must contain at least one allocation")
+        return pd.DataFrame(rows).set_index("Portfolio")
+
+    @staticmethod
+    def format_performance_table(table: pd.DataFrame) -> pd.DataFrame:
+        required = {"Return", "Volatility", "Sharpe"}
+        if not required.issubset(table.columns):
+            raise ValueError(f"table must contain columns {sorted(required)}")
+        formatted = table.copy()
+        formatted["Return"] = formatted["Return"].astype(float).map(lambda value: f"{value:.2%}")
+        formatted["Volatility"] = formatted["Volatility"].astype(float).map(
+            lambda value: f"{value:.2%}"
+        )
+        formatted["Sharpe"] = formatted["Sharpe"].astype(float).map(lambda value: f"{value:.4f}")
+        return formatted
+
+    def plot_weights_grouped(self, weights: pd.DataFrame, title="Portfolio weights"):
+        if list(weights.index) != self.assets:
+            raise ValueError("weights index must match asset_names in the same order")
+        if weights.shape[1] < 1:
+            raise ValueError("weights must contain at least one portfolio column")
+
+        figure, axis = plt.subplots(figsize=(11, 6))
+        x_positions = np.arange(len(self.assets))
+        width = 0.85 / weights.shape[1]
+        for column_index, column in enumerate(weights.columns):
+            axis.bar(
+                x_positions + column_index * width,
+                weights[column].to_numpy(dtype=float),
+                width,
+                label=column,
+            )
+        axis.set_xticks(x_positions + width * (weights.shape[1] - 1) / 2)
+        axis.set_xticklabels(self.assets, rotation=30, ha="right")
+        axis.yaxis.set_major_formatter(PercentFormatter(1.0))
+        axis.set_ylabel("Weight")
+        axis.set_title(title)
+        axis.legend()
+        figure.tight_layout()
+        return figure, axis
+
+    def plot_allocation_pie(
+        self,
+        weights: pd.Series,
+        title="Portfolio allocation",
+        *,
+        minimum_weight: float = 1e-4,
+        save_path=None,
+    ):
+        if not isinstance(weights, pd.Series):
+            raise ValueError("weights must be a pandas Series indexed by asset name")
+        minimum_weight = float(minimum_weight)
+        if not np.isfinite(minimum_weight) or minimum_weight < 0.0:
+            raise ValueError("minimum_weight must be finite and non-negative")
+        selected = weights[weights > minimum_weight].sort_values(ascending=False)
+        if selected.empty:
+            raise ValueError("no weights exceed minimum_weight")
+
+        colour_map = plt.get_cmap("tab20")
+        colours = [colour_map(index % colour_map.N) for index in range(len(selected))]
+        figure, axis = plt.subplots(figsize=(9, 7))
+        wedges, _, _ = axis.pie(
+            selected,
+            autopct="%1.1f%%",
+            startangle=90,
+            colors=colours,
+            pctdistance=0.8,
+        )
+        axis.legend(
+            wedges,
+            selected.index,
+            title="Asset classes",
+            loc="center left",
+            bbox_to_anchor=(1, 0.5),
+        )
+        axis.set_title(title)
+        axis.axis("equal")
+        figure.tight_layout()
+        if save_path is not None:
+            figure.savefig(Path(save_path), dpi=300, bbox_inches="tight")
+        return figure, axis
