@@ -62,6 +62,10 @@ print(result.max_constraint_violation)
 
 `StaticOptimizer` raises `OptimizationError` when SLSQP fails or returns a materially infeasible solution. It does not clip or renormalise the optimiser output after solving, because doing so can silently violate the supplied constraints.
 
+## Custom constraints
+
+By default, the optimizer imposes full investment (`sum(weights) = 1`). Supplying `constraints=` **replaces** that default with the given SciPy constraints rather than adding to it. Include `full_investment_constraint()` when constructing custom constraint lists, or use `create_style_constraints()`, which already includes full investment.
+
 ## Notebooks
 
 ```text
